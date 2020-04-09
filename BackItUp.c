@@ -56,51 +56,51 @@ fplist *addList(fplist *prevfp, char *filePath, int type) {
 
 // Recursively list and add readable files and directories to fplist struct
 int listFiles(char *directory, fplist *p) {
-	if(access(directory,F_OK) != 0) { //Check access to see if the directory/file exists (F_OK)
+    if(access(directory,F_OK) != 0) { //Check access to see if the directory/file exists (F_OK)
 		                              //0 = exists, 1 = doesnt exist
         fprintf(stderr,"error = %d : %s, %s doesn't exist\n",errno,strerror(errno), directory);
         return(0);
     }
 
-	if(access(directory,R_OK) != 0) { //Check access to see if the directory/file is readable (R_OK)
+    if(access(directory,R_OK) != 0) { //Check access to see if the directory/file is readable (R_OK)
 		                              //0 = readable, 1 = not readable
         fprintf(stderr,"error = %d : %s, %s isn't readable\n",errno,strerror(errno), directory);
         return(0);
     }
 	
-	printf("%s\n",directory); //Print the current working directory
+    printf("%s\n",directory); //Print the current working directory
 
     fplist *newp = addList(p, directory, 0);
     printf("filepath: %s, type: %d\n", newp->filepath, newp->type);
 
-	DIR *dir;                   //Directory pointer
+    DIR *dir;                   //Directory pointer
     struct dirent *entry;       //Structure with info referring to a directory entry
     char filePath[MAX_PATH_LENGTH]; //Buffer to hold filepaths
 
-	if( (dir = opendir(directory)) == NULL ) { //Attempt to open directory
+    if( (dir = opendir(directory)) == NULL ) { //Attempt to open directory
         fprintf(stderr,"error = %d : %s, couldn't read %s\n",errno,strerror(errno), directory);
-		return(0);
+        return(0);
     }
 	
     int firstRun = 0;
     fplist *newnewp;
-	while( (entry = readdir(dir)) != NULL ) { //Attempt to read file(s) in directory
-		//If current read directory is current working directory/parent directory
-		if( strcmp(entry->d_name,".") == 0 || strcmp(entry->d_name,"..") == 0 || strcmp(entry->d_name,".backup") == 0 || strcmp(entry->d_name,".git") == 0) {
-			continue;  //Skip through the remaining part of the while loop
+    while( (entry = readdir(dir)) != NULL ) { //Attempt to read file(s) in directory
+        //If current read directory is current working directory/parent directory
+        if( strcmp(entry->d_name,".") == 0 || strcmp(entry->d_name,"..") == 0 || strcmp(entry->d_name,".backup") == 0 || strcmp(entry->d_name,".git") == 0) {
+            continue;  //Skip through the remaining part of the while loop
         }              //for a single iteration, continue while with next file value
 		
-		//Append next file in directory to end of filepath
-		//snprintf() so we don't have 'accidental' buffer overwrite
-		snprintf(filePath,sizeof(filePath) - 1,"%s/%s",directory,entry->d_name);
+        //Append next file in directory to end of filepath
+        //snprintf() so we don't have 'accidental' buffer overwrite
+        snprintf(filePath,sizeof(filePath) - 1,"%s/%s",directory,entry->d_name);
         //sprintf(filePath,"%s/%s",directory,entry->d_name); <- not as safe
         
-		//Check dirent flags of current directory/file
-		if(entry->d_type == DT_REG) { //If the file is a regular file
-			if(access(filePath,R_OK) == 0) {  //And the file is readable
-				//Print the filepath we have/the file we checked
-				printf("%s\n",filePath);
-				//printf("%s/%s\n",directory,entry->d_name); <- could have done this way
+        //Check dirent flags of current directory/file
+        if(entry->d_type == DT_REG) { //If the file is a regular file
+            if(access(filePath,R_OK) == 0) {  //And the file is readable
+                //Print the filepath we have/the file we checked
+                printf("%s\n",filePath);
+                //printf("%s/%s\n",directory,entry->d_name); <- could have done this way
 
                 if(firstRun == 0) {
                     newnewp = addList(newp, filePath, 1);
@@ -112,24 +112,23 @@ int listFiles(char *directory, fplist *p) {
                     newnewp = addList(newnewp, filePath, 1);
                     printf("filepath: %s, type: %d, firstRun: %d\n", newnewp->filepath, newnewp->type, firstRun);
                 }
-                
-			}
-			else {
-				fprintf(stderr, "error: file %s isn't readable\n",filePath);
-			}
-		}
-		else if(entry->d_type == DT_DIR) { //Else if the file is a directory
+            }
+            else {
+                fprintf(stderr, "error: file %s isn't readable\n",filePath);
+            }
+        }
+        else if(entry->d_type == DT_DIR) { //Else if the file is a directory
             if(firstRun == 0) {
                 listFiles(filePath, newp);
             }
             else {
-			    listFiles(filePath, newnewp); //Recursivly list the files in the directory
+                listFiles(filePath, newnewp); //Recursivly list the files in the directory
             }
-		}
-	}
-	if( closedir(dir) == -1 ) { //Close the directory we were working with
-		fprintf(stderr,"error = %d : %s\n",errno,strerror(errno));
-	}	
+        }
+    }
+    if( closedir(dir) == -1 ) { //Close the directory we were working with
+        fprintf(stderr,"error = %d : %s\n",errno,strerror(errno));
+    }	
 }
 
 void printList(fplist *sent) {
