@@ -8,8 +8,8 @@
 #include <unistd.h>
 #include <errno.h>
 
-int main(int argc, char** argv) {
-    // Create a directory called .backup if one does not already exist
+// Create a directory called .backup if one does not already exist
+void createBackup() {
     const char *folder = ".backup";
     struct stat sb;
     
@@ -25,5 +25,11 @@ int main(int argc, char** argv) {
             perror(".backup mkdir");
         }
     }
+    return;
+}
+
+int main(int argc, char** argv) {
+    // Create a directory called .backup if one does not already exist
+    createBackup();
 
 }
