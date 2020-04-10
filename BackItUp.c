@@ -10,7 +10,7 @@
 #include <errno.h>
 #include <dirent.h>
 #include <string.h>
-#define MAX_PATH_LENGTH 1000 //Max filepath length
+#define MAX_PATH_LENGTH 1024 //Max filepath length
 
 typedef struct fplist{
     char *filepath;
@@ -131,6 +131,15 @@ int listFiles(char *directory, fplist *p) {
     }	
 }
 
+fplist *createfplistSent() {
+    fplist *sent = malloc(sizeof(fplist));
+    sent->filepath = malloc(strlen("sentinel") + 1);
+    strcpy(sent->filepath, "sentinel\0");
+    sent->type = 2;
+    sent->next = NULL;
+    return(sent);
+}
+
 void printList(fplist *sent) {
     fplist *p = sent;
     while(p) {
@@ -159,11 +168,7 @@ int main(int argc, char** argv) {
         perror("getcwd");
     }
     // Create new filepath structure for read filepaths to be entered into
-    fplist *sent = malloc(sizeof(fplist));
-    sent->filepath = malloc(strlen("sentinel") + 1);
-    strcpy(sent->filepath, "sentinel\0");
-    sent->type = 2;
-    sent->next = NULL;
+    fplist *sent = createfplistSent();
     listFiles(directory, sent);
 
     printList(sent);
