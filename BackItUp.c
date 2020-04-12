@@ -10,11 +10,13 @@
 #include <errno.h>
 #include <dirent.h>
 #include <string.h>
+#include <pthread.h>
 #define MAX_PATH_LENGTH 1024 //Max filepath length
 
 typedef struct fplist{
     char *filepath;
     int type; // 0 = directory, 1 = file, 2 = sentinel
+    int threadNum;  //Identifying thread number
     struct fplist *next;
 } fplist;
 
@@ -42,9 +44,9 @@ void createBackup() {
 fplist *addList(fplist *prevfp, char *filePath, int type) {
     while(prevfp->next != NULL) {
         prevfp = prevfp->next;
-        printf("Going to next\n");
+        //printf("Going to next\n");
     }
-    fplist *p = malloc(sizeof(fplist));
+    fplist *p = (fplist *)malloc(sizeof(fplist));
     p->filepath = malloc(strlen(filePath) + 1);
     strcpy(p->filepath, filePath);
     p->type = type; 
@@ -71,7 +73,7 @@ int listFiles(char *directory, fplist *p) {
     printf("%s\n",directory); //Print the current working directory
 
     fplist *newp = addList(p, directory, 0);
-    printf("filepath: %s, type: %d\n", newp->filepath, newp->type);
+    //printf("filepath: %s, type: %d\n", newp->filepath, newp->type);
 
     DIR *dir;                   //Directory pointer
     struct dirent *entry;       //Structure with info referring to a directory entry
@@ -105,12 +107,12 @@ int listFiles(char *directory, fplist *p) {
                 if(firstRun == 0) {
                     newnewp = addList(newp, filePath, 1);
                     firstRun++;
-                    printf("filepath: %s, type: %d\n", newnewp->filepath, newnewp->type);
+                    //printf("filepath: %s, type: %d\n", newnewp->filepath, newnewp->type);
                 }
                 else {
                     firstRun++;
                     newnewp = addList(newnewp, filePath, 1);
-                    printf("filepath: %s, type: %d, firstRun: %d\n", newnewp->filepath, newnewp->type, firstRun);
+                    //printf("filepath: %s, type: %d, firstRun: %d\n", newnewp->filepath, newnewp->type, firstRun);
                 }
             }
             else {
@@ -129,15 +131,78 @@ int listFiles(char *directory, fplist *p) {
     if( closedir(dir) == -1 ) { //Close the directory we were working with
         fprintf(stderr,"error = %d : %s\n",errno,strerror(errno));
     }	
+    return(0);
 }
 
 fplist *createfplistSent() {
-    fplist *sent = malloc(sizeof(fplist));
+    fplist *sent = (fplist *)malloc(sizeof(fplist));
     sent->filepath = malloc(strlen("sentinel") + 1);
     strcpy(sent->filepath, "sentinel\0");
     sent->type = 2;
     sent->next = NULL;
     return(sent);
+}
+
+void *copyFile(void *file) {
+    //fplist *f = file;
+    //printf("copyFile::: filepath: %s, threadNum: %d\n", ((struct fplist *)file)->filepath, ((struct fplist *)file)->threadNum);
+    //printf("copyFile::: filepath: %s, threadNum: %d\n", f->filepath, f->threadNum);
+    //printf("[thread %d] Backing up %s\n", f->threadNum, f->filepath);
+
+    // char buffer[MAX_PATH_LENGTH];
+    // size_t bytes;
+    // FILE *inputFile, *outputFile;
+    // inputFile = fopen("CSV.csv", "rb");
+    // outputFile = fopen("CSVDest.csv", "wb");
+    // if(fin == NULL || fou == NULL)
+    //     return 1;                                               // or other action
+    // while ((bytes = fread(buffer, 1, BUFFSIZE, fin)) != 0) {
+    //     if(fwrite(buffer, 1, bytes, fou) != bytes) {
+    //         return 1;                                           // or other action
+    //     }
+    // }
+    // fclose(fou);
+    // fclose(fin);
+    return(0);
+}
+
+void createBackupThreads(fplist *sent) {
+    int filePathCount = 0;
+    fplist *p = sent;
+    // Don't want to include the sentinel or cwd in total count
+    p = p->next->next;
+    // Get total filePath count so we know how many threads to spawn
+    while(p) {
+        //printf("filepath: %s ... type: %d\n", p->filepath, p->type);
+        filePathCount++;
+        p = p->next;
+    }
+    printf("Total files to be copied (threads to be created): %d\n", filePathCount);
+
+    //Create pthread array to help create each filePath with a seperate thread
+    pthread_t threads[filePathCount];
+    int threadNumber = 1;
+    p = sent;
+    // Skip the sentinel and cwd
+    p = p->next->next;
+    // Copy each filePath into .backup with a seperate thread
+    while(p) {
+        p->threadNum = threadNumber;
+        //printf("filepath: %s, threadNum: %d\n", p->filepath, p->threadNum);
+        printf("[thread %d] Backing up %s\n", p->threadNum, p->filepath);
+        if(pthread_create(&threads[threadNumber-1], NULL, copyFile, p) != 0) {
+            perror("createBackupThreads pthread_create error");
+        }
+        threadNumber++;
+        p = p->next;
+    }
+    //Wait until all threads have exited (joined)
+    for(int i = 0; i < filePathCount; i++) {
+        if(pthread_join(threads[i], NULL) != 0) {
+            perror("createBackupThreads pthread_join error");
+        } 
+    }
+    printf("All threads have joined\n");
 }
 
 void printList(fplist *sent) {
@@ -162,16 +227,21 @@ int main(int argc, char** argv) {
     // Create a directory called .backup if one does not already exist
     createBackup();
 
-    //Recursively read in all readable/regular files/directories into filepath structure
+    // Recursively read in all readable regular files/directories into filepath structure
+    // Create new filepath structure for read filepaths to be entered into
+    fplist *sent = createfplistSent();
+    // Get the current working directory to start recursing into
     char directory[MAX_PATH_LENGTH];
     if(getcwd(directory, sizeof(directory)) == NULL) {
         perror("getcwd");
     }
-    // Create new filepath structure for read filepaths to be entered into
-    fplist *sent = createfplistSent();
+    // Recursively read and add filepaths into structure
     listFiles(directory, sent);
 
-    printList(sent);
+    // Copy all of the regular filepaths in structure into .backup
+    createBackupThreads(sent);
+
+    //printList(sent);
     freeList(sent);
     
 }
