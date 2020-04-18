@@ -15,7 +15,7 @@
 
 typedef struct fplist{
     char *filepath;
-    int type; // 0 = directory, 1 = file, 2 = sentinel
+    int type; // 0 = sentinel, 1 = file
     int threadNum;  //Identifying thread number
     int bytesCopied; //Number of bytes copied from file to backup
     struct fplist *next;
@@ -56,102 +56,8 @@ fplist *addList(fplist *prevfp, char *filePath, int type) {
     return(p);
 }
 
-// Recursively list and add readable files and directories to fplist struct
-int listFiles(char *directory, fplist *p) {
-    if(access(directory,F_OK) != 0) { //Check access to see if the directory/file exists (F_OK)
-		                              //0 = exists, 1 = doesnt exist
-        fprintf(stderr,"error = %d : %s, %s doesn't exist\n",errno,strerror(errno), directory);
-        return(0);
-    }
-
-    if(access(directory,R_OK) != 0) { //Check access to see if the directory/file is readable (R_OK)
-		                              //0 = readable, 1 = not readable
-        fprintf(stderr,"error = %d : %s, %s isn't readable\n",errno,strerror(errno), directory);
-        return(0);
-    }
-	
-    printf("%s\n",directory); //Print the current working directory
-
-    fplist *newp = addList(p, directory, 0);
-    //printf("filepath: %s, type: %d\n", newp->filepath, newp->type);
-
-    DIR *dir;                   //Directory pointer
-    struct dirent *entry;       //Structure with info referring to a directory entry
-    char filePath[MAX_PATH_LENGTH]; //Buffer to hold filepaths
-
-    if( (dir = opendir(directory)) == NULL ) { //Attempt to open directory
-        fprintf(stderr,"error = %d : %s, couldn't read %s\n",errno,strerror(errno), directory);
-        return(0);
-    }
-	
-    int firstRun = 0;
-    fplist *newnewp;
-    while( (entry = readdir(dir)) != NULL ) { //Attempt to read file(s) in directory
-        //If current read directory is current working directory/parent directory
-        if( strcmp(entry->d_name,".") == 0 || strcmp(entry->d_name,"..") == 0 || strcmp(entry->d_name,".backup") == 0 || strcmp(entry->d_name,".git") == 0) {
-            continue;  //Skip through the remaining part of the while loop
-        }              //for a single iteration, continue while with next file value
-		
-        //Append next file in directory to end of filepath
-        //snprintf() so we don't have 'accidental' buffer overwrite
-        snprintf(filePath,sizeof(filePath) - 1,"%s/%s",directory,entry->d_name);
-        //sprintf(filePath,"%s/%s",directory,entry->d_name); <- not as safe
-        
-        //Check dirent flags of current directory/file
-        if(entry->d_type == DT_REG) { //If the file is a regular file
-            if(access(filePath,R_OK) == 0) {  //And the file is readable
-                //Print the filepath we have/the file we checked
-                printf("%s\n",filePath);
-                //printf("%s/%s\n",directory,entry->d_name); <- could have done this way
-
-                if(firstRun == 0) {
-                    newnewp = addList(newp, filePath, 1);
-                    firstRun++;
-                    //printf("filepath: %s, type: %d\n", newnewp->filepath, newnewp->type);
-                }
-                else {
-                    firstRun++;
-                    newnewp = addList(newnewp, filePath, 1);
-                    //printf("filepath: %s, type: %d, firstRun: %d\n", newnewp->filepath, newnewp->type, firstRun);
-                }
-            }
-            else {
-                fprintf(stderr, "error: file %s isn't readable\n",filePath);
-            }
-        }
-        else if(entry->d_type == DT_DIR) { //Else if the file is a directory
-            if(firstRun == 0) {
-                listFiles(filePath, newp);
-            }
-            else {
-                listFiles(filePath, newnewp); //Recursivly list the files in the directory
-            }
-        }
-    }
-    if( closedir(dir) == -1 ) { //Close the directory we were working with
-        fprintf(stderr,"error = %d : %s\n",errno,strerror(errno));
-    }	
-    return(0);
-}
-
-fplist *createfplistSent() {
-    fplist *sent = (fplist *)malloc(sizeof(fplist));
-    sent->filepath = malloc(strlen("sentinel") + 1);
-    strcpy(sent->filepath, "sentinel\0");
-    sent->type = 2;
-    sent->next = NULL;
-    return(sent);
-}
-
-// Thread function is passed a filePath to copy into the .backup folder with .bak appended
-void *copyFile(void *file) {
-    fplist *f = file;
-    //printf("copyFile::: filepath: %s, threadNum: %d\n", ((struct fplist *)file)->filepath, ((struct fplist *)file)->threadNum);
-    //printf("copyFile::: filepath: %s, threadNum: %d\n", f->filepath, f->threadNum);
-
-    // Create the name of the backup file with .back appened
-    char backupPath[MAX_PATH_LENGTH];
-    
+// Create the name of the backup file with .backup appended into path
+char *createBackupPath(char *f, char *backupPath) {
     // Get the current working directory to parse out of filePath
     char directory[MAX_PATH_LENGTH];
     if(getcwd(directory, sizeof(directory)) == NULL) {
@@ -162,7 +68,7 @@ void *copyFile(void *file) {
     // Iterate and copy filepath into backup path until it matches cwd
     // Make a copy of f->filepath so strtok does not destroy it
     char filepathCopy[MAX_PATH_LENGTH]; 
-    strcpy(filepathCopy, f->filepath);
+    strcpy(filepathCopy, f);
     char* token = strtok(filepathCopy, "/");
     // Keep copying tokens while / delimiter is present in filepath 
     while (token != NULL) { 
@@ -189,57 +95,180 @@ void *copyFile(void *file) {
         token = strtok(NULL, "/"); 
     }
     //printf("backup path now: %s\n", backupPath);
-    
-    // Create a new directory in .backup if the type of filepath is DT_DIR
-    int ret;
-    if(f->type == 0) {
-        ret = mkdir(backupPath, 0666);
+    return(backupPath);
+}
+
+// Recursively list and add readable files to fplist struct, creating directories in .backup
+int listFiles(char *directory, fplist *p) {
+    if(access(directory,F_OK) != 0) { //Check access to see if the directory/file exists (F_OK)
+		                              //0 = exists, 1 = doesnt exist
+        fprintf(stderr,"error = %d : %s, %s doesn't exist\n",errno,strerror(errno), directory);
+        return(0);
+    }
+
+    if(access(directory,R_OK) != 0) { //Check access to see if the directory/file is readable (R_OK)
+		                              //0 = readable, 1 = not readable
+        fprintf(stderr,"error = %d : %s, %s isn't readable\n",errno,strerror(errno), directory);
+        return(0);
+    }
+	
+    printf("--- %s\n" ,directory);
+    // Dont want to backup cwd in .backup folder, so get cwd to compare with
+    char cwd[MAX_PATH_LENGTH];
+    if(getcwd(cwd, sizeof(cwd)) == NULL) {
+        perror("listFiles getcwd");
+    }
+
+    // If directory isn't cwd, create new copy of directory in .backup
+    if(strcmp(directory, cwd) != 0) {
+        char *backupPath = malloc(sizeof(char) * MAX_PATH_LENGTH);
+        memset(backupPath, '\0', sizeof(char)* MAX_PATH_LENGTH );
+        backupPath = createBackupPath(directory, backupPath);
+        strcat(backupPath, "\0");
+
+        int ret;
+        ret = mkdir(backupPath, 0700);
         if(ret != 0) {
             fprintf(stderr, "copyFile mkdir %s\n", backupPath);
+            perror("mkdir");
         }
-        f->bytesCopied = 0;
+        else {
+            printf("Created %s\n", backupPath);
+        }
+        free(backupPath);
     }
-    else if(f->type == 1) {
-        strcat(backupPath, ".bak\0");
-        printf("copyFile: filepath: %s, backuppath: %s\n", f->filepath, backupPath);
+    else {
+        printf("Not backing up cwd\n");
+    }
+    
+    printf("%s\n",directory); //Print the current working directory
 
-        char buffer[MAX_PATH_LENGTH];
-        size_t bytes;
-        int totalBytes = 0;
-        FILE *inputFile, *outputFile;
+    DIR *dir;                   //Directory pointer
+    struct dirent *entry;       //Structure with info referring to a directory entry
+    char filePath[MAX_PATH_LENGTH]; //Buffer to hold filepaths
 
-        // Attempt to open input/output files
-        if((inputFile = fopen(f->filepath, "rb")) == NULL) {
-            perror("copyFile inputFile fopen");
-            return(0);
-        }
-        if((outputFile = fopen(backupPath, "wb")) == NULL) {
-            perror("copyFile outputFile fopen");
-            return(0);
-        }
-
-        // Copy the inputFile into the outputFile
-        while ((bytes = fread(buffer, 1, MAX_PATH_LENGTH, inputFile)) != 0) {
-            if(fwrite(buffer, 1, bytes, outputFile) != bytes) {
-                fprintf(stderr, "copyFile fwrite wrote %ld bytes\n", bytes);
-                return(0);
-            }
-            totalBytes += bytes;
-        }
+    if( (dir = opendir(directory)) == NULL ) { //Attempt to open directory
+        fprintf(stderr,"error = %d : %s, couldn't read %s\n",errno,strerror(errno), directory);
+        return(0);
+    }
+	
+    int firstRun = 0;
+    fplist *newp;
+    while( (entry = readdir(dir)) != NULL ) { //Attempt to read file(s) in directory
+        //If current read directory is current working directory/parent directory
+        if( strcmp(entry->d_name,".") == 0 || strcmp(entry->d_name,"..") == 0 || strcmp(entry->d_name,".backup") == 0 || strcmp(entry->d_name,".git") == 0) {
+            continue;  //Skip through the remaining part of the while loop
+        }              //for a single iteration, continue while with next file value
+		
+        //Append next file in directory to end of filepath
+        //snprintf() so we don't have 'accidental' buffer overwrite
+        snprintf(filePath,sizeof(filePath) - 1,"%s/%s",directory,entry->d_name);
+        //sprintf(filePath,"%s/%s",directory,entry->d_name); <- not as safe
         
-        // Set the bytesCopied part of fplist struct to number of bytes copied from file
-        f->bytesCopied = totalBytes;
-        printf("[thread %d] Copied %d bytes from %s to %s\n", f->threadNum, f->bytesCopied, f->filepath, backupPath);
-        // Close the opened files and return
-        if(fclose(inputFile) != 0) {
-            perror("copyFile inputFile fclose");
-            return(0);
+        //Check dirent flags of current directory/file
+        if(entry->d_type == DT_REG) { //If the file is a regular file
+            if(access(filePath,R_OK) == 0) {  //And the file is readable
+                //Print the filepath we have/the file we checked
+                printf("%s\n",filePath);
+                //printf("%s/%s\n",directory,entry->d_name); <- could have done this way
+
+                if(firstRun == 0) {
+                    newp = addList(p, filePath, 1);
+                    firstRun++;
+                    //printf("filepath: %s, type: %d\n", newnewp->filepath, newnewp->type);
+                }
+                else {
+                    firstRun++;
+                    newp = addList(newp, filePath, 1);
+                    //printf("filepath: %s, type: %d, firstRun: %d\n", newnewp->filepath, newnewp->type, firstRun);
+                }
+            }
+            else {
+                fprintf(stderr, "error: file %s isn't readable\n",filePath);
+            }
         }
-        if(fclose(outputFile) != 0) {
-            perror("copyFile outputFile fclose");
-            return(0);
+        else if(entry->d_type == DT_DIR) { //Else if the file is a directory
+            if(firstRun == 0) {
+                listFiles(filePath, p);
+            }
+            else {
+                listFiles(filePath, newp); //Recursivly list the files in the directory
+            }
         }
     }
+    if(closedir(dir) == -1) { //Close the directory we were working with
+        fprintf(stderr,"error = %d : %s\n",errno,strerror(errno));
+    }	
+    return(0);
+}
+
+fplist *createfplistSent() {
+    fplist *sent = (fplist *)malloc(sizeof(fplist));
+    sent->filepath = malloc(strlen("sentinel") + 1);
+    strcpy(sent->filepath, "sentinel\0");
+    sent->type = 0;
+    sent->next = NULL;
+    return(sent);
+}
+
+// Thread function is passed a filePath to copy into the .backup folder with .bak appended
+void *copyFile(void *file) {
+    fplist *f = file;
+    //printf("copyFile::: filepath: %s, threadNum: %d\n", ((struct fplist *)file)->filepath, ((struct fplist *)file)->threadNum);
+    //printf("copyFile::: filepath: %s, threadNum: %d\n", f->filepath, f->threadNum);
+
+    // Create the name of the backup file with .back appened
+    char *backupPath = malloc(sizeof(char) * MAX_PATH_LENGTH);
+    memset(backupPath, '\0', sizeof(char)* MAX_PATH_LENGTH );
+    backupPath = createBackupPath(f->filepath, backupPath);
+    
+    strcat(backupPath, ".bak\0");
+    printf("copyFile: filepath: %s, backuppath: %s\n", f->filepath, backupPath);
+
+    char buffer[MAX_PATH_LENGTH];
+    size_t bytes;
+    int totalBytes = 0;
+    FILE *inputFile, *outputFile;
+
+    // Attempt to open input/output files
+    if((inputFile = fopen(f->filepath, "rb")) == NULL) {
+        perror("copyFile inputFile fopen");
+        free(backupPath);
+        return(0);
+    }
+    if((outputFile = fopen(backupPath, "wb")) == NULL) {
+        perror("copyFile outputFile fopen");
+        free(backupPath);
+        return(0);
+    }
+
+    // Copy the inputFile into the outputFile
+    while ((bytes = fread(buffer, 1, MAX_PATH_LENGTH, inputFile)) != 0) {
+        if(fwrite(buffer, 1, bytes, outputFile) != bytes) {
+            fprintf(stderr, "copyFile fwrite wrote %ld bytes\n", bytes);
+            free(backupPath);
+            return(0);
+        }
+        totalBytes += bytes;
+    }
+    
+
+    // Set the bytesCopied part of fplist struct to number of bytes copied from file
+    f->bytesCopied = totalBytes;
+    printf("[thread %d] Copied %d bytes from %s to %s\n", f->threadNum, f->bytesCopied, f->filepath, backupPath);
+    // Close the opened files and return
+    if(fclose(inputFile) != 0) {
+        perror("copyFile inputFile fclose");
+        free(backupPath);
+        return(0);
+    }
+    if(fclose(outputFile) != 0) {
+        perror("copyFile outputFile fclose");
+        free(backupPath);
+        return(0);
+    }
+    
+    free(backupPath);
     return(0);
 }
 
@@ -247,7 +276,7 @@ void createBackupThreads(fplist *sent) {
     int filePathCount = 0;
     fplist *p = sent;
     // Don't want to include the sentinel or cwd in total count
-    p = p->next->next;
+    p = p->next;
     // Get total filePath count so we know how many threads to spawn
     while(p) {
         //printf("filepath: %s ... type: %d\n", p->filepath, p->type);
@@ -261,12 +290,9 @@ void createBackupThreads(fplist *sent) {
     int threadNumber = 1;
 
     p = sent;
-    // Skip the sentinel and cwd
-    p = p->next->next;
+    // Skip the sentinel
+    p = p->next;
     // Copy each filePath into .backup with a seperate thread
-
-    // TODO: Create all directories before creating all individual files
-
     while(p) {
         p->threadNum = threadNumber;
         //printf("filepath: %s, threadNum: %d\n", p->filepath, p->threadNum);
@@ -284,6 +310,16 @@ void createBackupThreads(fplist *sent) {
         } 
     }
     printf("All threads have joined\n");
+
+    p = sent;
+    // Skip the sentinel
+    p = p->next;
+    int totalBytes = 0;
+    while(p) {
+        totalBytes += p->bytesCopied;
+        p = p->next;
+    }
+    printf("Successfully copied %d files (%d bytes)\n", filePathCount, totalBytes);
 }
 
 void printList(fplist *sent) {
@@ -316,7 +352,7 @@ int main(int argc, char** argv) {
     if(getcwd(directory, sizeof(directory)) == NULL) {
         perror("getcwd");
     }
-    // Recursively read and add filepaths into structure
+    // Recursively read and add filepaths into structure, creating directories in .backup
     listFiles(directory, sent);
 
     // Copy all of the regular filepaths in structure into .backup
