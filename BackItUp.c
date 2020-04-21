@@ -62,7 +62,7 @@ char *createBackupPath(char *f, char *backupPath) {
     // Get the current working directory to parse out of filePath
     char directory[MAX_PATH_LENGTH];
     if(getcwd(directory, sizeof(directory)) == NULL) {
-        perror("copyFile getcwd");
+        perror("createBackupPath getcwd");
     }
     //printf("directory: %s\n", directory);
 
@@ -289,7 +289,7 @@ void *copyFile(void *file) {
         // Copy the inputFile into the outputFile
         while ((bytes = fread(buffer, 1, MAX_PATH_LENGTH, inputFile)) != 0) {
             if(fwrite(buffer, 1, bytes, outputFile) != bytes) {
-                fprintf(stderr, "copyFile fwrite wrote %ld bytes\n", bytes);
+                fprintf(stderr, "[thread %d] copyFile fwrite wrote %ld bytes\n", f->threadNum, bytes);
                 free(backupPath);
                 return(0);
             }
