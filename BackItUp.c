@@ -58,7 +58,7 @@ fplist *addList(fplist *prevfp, char *filePath, int type) {
 }
 
 // Create the name of the backup file with .backup appended into path
-char *createBackupPath(char *f, char *backupPath) {
+char *createBackupPath(char *f, char *backupPath, int flag) {
     // Get the current working directory to parse out of filePath
     char directory[MAX_PATH_LENGTH];
     if(getcwd(directory, sizeof(directory)) == NULL) {
@@ -71,20 +71,38 @@ char *createBackupPath(char *f, char *backupPath) {
     char filepathCopy[MAX_PATH_LENGTH]; 
     strcpy(filepathCopy, f);
     char *token = strtok(filepathCopy, "/");
-    // Keep copying tokens while / delimiter is present in filepath 
-    while (token != NULL) { 
-        //printf("token: %s\n", token); 
-        strcat(backupPath, "/");
-        strcat(backupPath, token);
-        //printf("backup path now: %s\n", backupPath);
-        if(strcmp(directory, backupPath) == 0) {
-            //printf("match\n");
-            break;
-        }
-        token = strtok(NULL, "/");   
-    } 
-    // Append /.backup to the copied matching cwd backup path
-    strcat(backupPath, "/.backup");
+    // If flag = 0: Parse through filepath until it matches cwd and append ./backup
+    if(flag == 0) {
+        // Keep copying tokens while / delimiter is present in filepath 
+        while (token != NULL) { 
+            //printf("token: %s\n", token); 
+            strcat(backupPath, "/");
+            strcat(backupPath, token);
+            //printf("backup path now: %s\n", backupPath);
+            if(strcmp(directory, backupPath) == 0) {
+                //printf("match\n");
+                break;
+            }
+            token = strtok(NULL, "/");   
+        } 
+        // Append /.backup to the copied matching cwd backup path
+        strcat(backupPath, "/.backup");
+    }
+    // If flag = 1: Parse through filepath until ./backup and then append the remaining filepath to the cwd
+    else if(flag == 1) {
+        // Keep copying tokens while / delimiter is present in filepath 
+        while (token != NULL) { 
+            //printf("backup path now: %s\n", backupPath);
+            if(strcmp(token, ".backup") == 0) {
+                //printf("match\n");
+                break;
+            }
+            token = strtok(NULL, "/");   
+        } 
+        // Copy the cwd to the backupPath
+        strcpy(backupPath, directory);
+    }
+
     // Continue copying the rest of the original filepath into backup path
     token = strtok(NULL, "/");
     // Keep copying tokens while / delimiter is present in filepath 
@@ -100,7 +118,7 @@ char *createBackupPath(char *f, char *backupPath) {
 }
 
 // Recursively list and add readable files to fplist struct, creating directories in .backup
-int listFiles(char *directory, fplist *p) {
+int listFiles(char *directory, fplist *p, int flag) {
     if(access(directory,F_OK) != 0) { //Check access to see if the directory/file exists (F_OK)
 		                              //0 = exists, 1 = doesnt exist
         fprintf(stderr,"error = %d : %s, %s doesn't exist\n",errno,strerror(errno), directory);
@@ -114,17 +132,30 @@ int listFiles(char *directory, fplist *p) {
     }
 	
     printf("--- %s\n" ,directory);
-    // Dont want to backup cwd in .backup folder, so get cwd to compare with
+    // If backing up dont want to backup cwd in .backup folder, so get cwd to compare with
     char cwd[MAX_PATH_LENGTH];
     if(getcwd(cwd, sizeof(cwd)) == NULL) {
         perror("listFiles getcwd");
     }
 
-    // If directory isn't cwd, create new copy of directory in .backup
+    // If restoring don't want to restore the .backup folder, so append .backup to compare with
+    if(flag == 1) {
+        strcat(cwd, "/.backup");
+    }
+
+    // flag = 0: If directory isn't cwd, create new copy of directory in .backup
+    // flag = 1: If directory isn't .backup folder create new copy of backup directory in cwd
     if(strcmp(directory, cwd) != 0) {
         char *backupPath = malloc(sizeof(char) * MAX_PATH_LENGTH);
         memset(backupPath, '\0', sizeof(char) * MAX_PATH_LENGTH );
-        backupPath = createBackupPath(directory, backupPath);
+        // If flag = 0: Add /.backup into filepath
+        if(flag == 0) {
+            backupPath = createBackupPath(directory, backupPath, 0);
+        }
+        // If flag = 1: Remove /.backup from the filepath and append to cwd
+        else if(flag == 1) {
+            backupPath = createBackupPath(directory, backupPath, 1);
+        }
         strcat(backupPath, "\0");
 
         int ret;
@@ -139,7 +170,12 @@ int listFiles(char *directory, fplist *p) {
         free(backupPath);
     }
     else {
-        printf("Not backing up cwd\n");
+        if(flag == 0) {
+            printf("Not backing up cwd\n");
+        }
+        else if(flag == 1) {
+            printf("Not restoring .backup\n");
+        }
     }
     
     printf("%s\n",directory); //Print the current working directory
@@ -190,10 +226,20 @@ int listFiles(char *directory, fplist *p) {
         }
         else if(entry->d_type == DT_DIR) { //Else if the file is a directory
             if(firstRun == 0) {
-                listFiles(filePath, p);
+                if(flag == 0) {
+                    listFiles(filePath, p, 0);
+                }
+                else if(flag == 1) {
+                    listFiles(filePath, p, 1);
+                }
             }
             else {
-                listFiles(filePath, newp); //Recursivly list the files in the directory
+                if(flag == 0) {
+                    listFiles(filePath, newp, 0); //Recursivly list the files in the directory
+                }
+                else if(flag == 1) {
+                    listFiles(filePath, newp, 1); //Recursivly list the files in the directory
+                }
             }
         }
     }
@@ -249,7 +295,7 @@ void *copyFile(void *file) {
     // Create the name of the backup file with .backup appened
     char *backupPath = malloc(sizeof(char) * MAX_PATH_LENGTH);
     memset(backupPath, '\0', sizeof(char) * MAX_PATH_LENGTH );
-    backupPath = createBackupPath(f->filepath, backupPath);
+    backupPath = createBackupPath(f->filepath, backupPath, 0);
     
     //Append .bak to the end of the backup file
     strcat(backupPath, ".bak\0");
@@ -397,16 +443,17 @@ int main(int argc, char** argv) {
         // Create a directory called .backup if one does not already exist
         createBackup();
 
-        // Recursively read in all readable regular files/directories into filepath structure
         // Create new filepath structure for read filepaths to be entered into
         fplist *sent = createfplistSent();
+
         // Get the current working directory to start recursing into
         char directory[MAX_PATH_LENGTH];
         if(getcwd(directory, sizeof(directory)) == NULL) {
             perror("getcwd");
         }
+
         // Recursively read and add filepaths into structure, creating directories in .backup
-        listFiles(directory, sent);
+        listFiles(directory, sent, 0);
 
         // Copy all of the regular filepaths in structure into .backup
         createBackupThreads(sent);
@@ -416,7 +463,22 @@ int main(int argc, char** argv) {
         return(0);
     }
     else if(argc == 2 && argv[1][0] == '-' && argv[1][1] == 'r') {
-        printf("Restoring from backup\n");
+        printf("Restoring from .backup\n");
+
+        // Create new filepath structure for read filepaths to be entered into
+        fplist *sent = createfplistSent();
+
+        // Get the .backup directory to start recursing into
+        char directory[MAX_PATH_LENGTH];
+        if(getcwd(directory, sizeof(directory)) == NULL) {
+            perror("getcwd");
+        }
+        strcat(directory, "/.backup");
+
+        // Recursively read and add filepaths into structure, creating directories in current working directory
+        listFiles(directory, sent, 1);
+
+        freeList(sent);
         return(0);
     }
     else {
