@@ -13,12 +13,13 @@
 #include <pthread.h>
 #define MAX_PATH_LENGTH 1024 //Max filepath length
 
+// Linked list stucture to store filepaths
 typedef struct fplist{
-    char *filepath;
-    int flag; // 0 = backing up, 1 = restoring
-    int threadNum;  //Identifying thread number
-    int bytesCopied; //Number of bytes copied from file to backup
-    struct fplist *next;
+    char *filepath;  // filepath to be backed up/restored
+    int flag;        // 0 = backing up, 1 = restoring
+    int threadNum;   // Identifying thread number
+    int bytesCopied; // Number of bytes copied from file to backup
+    struct fplist *next; // Pointer to next filepath
 } fplist;
 
 // Create a directory called .backup if one does not already exist
@@ -40,6 +41,15 @@ void createBackup() {
     return;
 }
 
+// Create a sentinel node for the beginning of the filepath linked list
+fplist *createfplistSent() {
+    fplist *sent = (fplist *)malloc(sizeof(fplist));
+    sent->filepath = malloc(strlen("sentinel") + 1);
+    strcpy(sent->filepath, "sentinel\0");
+    sent->next = NULL;
+    return(sent);
+}
+
 // Add a recursively read filepath to the fplist struct, and return the previous linked filepath
 fplist *addList(fplist *prevfp, char *filePath) {
     while(prevfp->next != NULL) {
@@ -59,8 +69,8 @@ fplist *addList(fplist *prevfp, char *filePath) {
 // Create the name of the backup file with .backup appended into path
 char *createBackupPath(char *f, char *backupPath, int flag) {
     // Get the current working directory to parse out of filePath
-    char directory[MAX_PATH_LENGTH];
-    if(getcwd(directory, sizeof(directory)) == NULL) {
+    char cwd[MAX_PATH_LENGTH];
+    if(getcwd(cwd, sizeof(cwd)) == NULL) {
         perror("createBackupPath getcwd");
     }
     //printf("directory: %s\n", directory);
@@ -69,6 +79,7 @@ char *createBackupPath(char *f, char *backupPath, int flag) {
     char filepathCopy[MAX_PATH_LENGTH]; 
     strcpy(filepathCopy, f);
     char *token = strtok(filepathCopy, "/");
+
     // If flag = 0: Parse through filepath until it matches cwd and append ./backup
     if(flag == 0) {
         // Keep copying tokens while / delimiter is present in filepath 
@@ -77,7 +88,7 @@ char *createBackupPath(char *f, char *backupPath, int flag) {
             strcat(backupPath, "/");
             strcat(backupPath, token);
             //printf("backup path now: %s\n", backupPath);
-            if(strcmp(directory, backupPath) == 0) {
+            if(strcmp(cwd, backupPath) == 0) {
                 //printf("match\n");
                 break;
             }
@@ -86,7 +97,7 @@ char *createBackupPath(char *f, char *backupPath, int flag) {
         // Append /.backup to the copied matching cwd backup path
         strcat(backupPath, "/.backup");
     }
-    // If flag = 1: Parse through filepath until /.backup and then append the remaining filepath to the cwd
+    // Else if flag = 1: Parse through filepath until /.backup and then append the remaining filepath to the cwd
     else if(flag == 1) {
         // Keep copying tokens while / delimiter is present in filepath 
         while (token != NULL) { 
@@ -98,7 +109,7 @@ char *createBackupPath(char *f, char *backupPath, int flag) {
             token = strtok(NULL, "/");   
         } 
         // Copy the cwd to the backupPath
-        strcpy(backupPath, directory);
+        strcpy(backupPath, cwd);
     }
 
     // Continue copying the rest of the original filepath into backup path
@@ -247,14 +258,7 @@ int listFiles(char *directory, fplist *p, int flag) {
     return(0);
 }
 
-fplist *createfplistSent() {
-    fplist *sent = (fplist *)malloc(sizeof(fplist));
-    sent->filepath = malloc(strlen("sentinel") + 1);
-    strcpy(sent->filepath, "sentinel\0");
-    sent->next = NULL;
-    return(sent);
-}
-
+// Check to see if original or backup file is more recently modified, or if backup file does not exist
 int isBackupMostRecent(char *originalFile, char *backupFile) {
     struct stat originalFile_stat;
     int ret = stat(originalFile, &originalFile_stat);
@@ -292,76 +296,88 @@ void *copyFile(void *file) {
     // Create the name of the backup file with .backup appened
     char *backupPath = malloc(sizeof(char) * MAX_PATH_LENGTH);
     memset(backupPath, '\0', sizeof(char) * MAX_PATH_LENGTH );
-    backupPath = createBackupPath(f->filepath, backupPath, 0);
-    
-    //Append .bak to the end of the backup file
-    strcat(backupPath, ".bak\0");
-    //printf("copyFile: filepath: %s, backuppath: %s\n", f->filepath, backupPath);
-
-    // Check to see if the backupPath exists/is newer then the original filepath
-    int ret = isBackupMostRecent(f->filepath, backupPath);
-    //printf("[thread %d] copyFile ret = %d\n", f->threadNum, ret);
-    // If backup file is more recently modified, no need to copy into .backup
-    if(ret == 1) {
-        printf("[thread %d] NOTICE: %s is already the most current version\n", f->threadNum, f->filepath);
-        f->bytesCopied = 0;
-    }
-    // Else if original file is more recently modified or backup isnt created yet, copy into .backup
-    else if(ret == 0 || ret == -1) {
-        // If backup file already exists in .backup, print warning
-        if(ret == 0) {
-            printf("[thread %d] WARNING: Overwriting %s\n", f->threadNum, backupPath);
-        }
-        char buffer[MAX_PATH_LENGTH];
-        size_t bytes;
-        int totalBytes = 0;
-        FILE *inputFile, *outputFile;
-
-        // Attempt to open input/output files
-        if((inputFile = fopen(f->filepath, "rb")) == NULL) {
-            perror("copyFile inputFile fopen");
-            free(backupPath);
-            return(0);
-        }
-        if((outputFile = fopen(backupPath, "wb")) == NULL) {
-            perror("copyFile outputFile fopen");
-            free(backupPath);
-            return(0);
-        }
-
-        // Copy the inputFile into the outputFile
-        while ((bytes = fread(buffer, 1, MAX_PATH_LENGTH, inputFile)) != 0) {
-            if(fwrite(buffer, 1, bytes, outputFile) != bytes) {
-                fprintf(stderr, "[thread %d] copyFile fwrite wrote %ld bytes\n", f->threadNum, bytes);
-                free(backupPath);
-                return(0);
-            }
-            totalBytes += bytes;
-        }
+    if(f->flag == 0) {
+        // Append /.backup into the filepath
+        backupPath = createBackupPath(f->filepath, backupPath, 0);
         
-        // Set the bytesCopied part of fplist struct to number of bytes copied from file
-        f->bytesCopied = totalBytes;
-        printf("[thread %d] Copied %d bytes from %s to %s\n", f->threadNum, f->bytesCopied, f->filepath, backupPath);
-
-        // Close the opened files and return
-        if(fclose(inputFile) != 0) {
-            perror("copyFile inputFile fclose");
-            free(backupPath);
-            return(0);
-        }
-        if(fclose(outputFile) != 0) {
-            perror("copyFile outputFile fclose");
-            free(backupPath);
-            return(0);
-        }
+        // Append .bak to the end of the backup filepath
+        strcat(backupPath, ".bak\0");
     }
+    else if(f->flag == 1) {
+        // Remove /.backup from the filepath
+        backupPath = createBackupPath(f->filepath, backupPath, 1);
+
+        // Remove .bak from the filepath by setting null term 4 charaters from end of string
+        backupPath[strlen(backupPath)-4] = 0;
+    }
+
+    printf("copyFile: filepath: %s, backuppath: %s\n", f->filepath, backupPath);
+    //printf("[thread %d] copyFile ret = %d\n", f->threadNum, ret);
+
+    // // Check to see if the backupPath exists/is newer then the original filepath
+    // int ret = isBackupMostRecent(f->filepath, backupPath);
+
+    // // If backup file is more recently modified, no need to copy into .backup
+    // if(ret == 1) {
+    //     printf("[thread %d] NOTICE: %s is already the most current version\n", f->threadNum, f->filepath);
+    //     f->bytesCopied = 0;
+    // }
+    // // Else if original file is more recently modified or backup isnt created yet, copy into .backup
+    // else if(ret == 0 || ret == -1) {
+    //     // If backup file already exists in .backup, print warning
+    //     if(ret == 0) {
+    //         printf("[thread %d] WARNING: Overwriting %s\n", f->threadNum, backupPath);
+    //     }
+    //     char buffer[MAX_PATH_LENGTH];
+    //     size_t bytes;
+    //     int totalBytes = 0;
+    //     FILE *inputFile, *outputFile;
+
+    //     // Attempt to open input/output files
+    //     if((inputFile = fopen(f->filepath, "rb")) == NULL) {
+    //         perror("copyFile inputFile fopen");
+    //         free(backupPath);
+    //         return(0);
+    //     }
+    //     if((outputFile = fopen(backupPath, "wb")) == NULL) {
+    //         perror("copyFile outputFile fopen");
+    //         free(backupPath);
+    //         return(0);
+    //     }
+
+    //     // Copy the inputFile into the outputFile
+    //     while ((bytes = fread(buffer, 1, MAX_PATH_LENGTH, inputFile)) != 0) {
+    //         if(fwrite(buffer, 1, bytes, outputFile) != bytes) {
+    //             fprintf(stderr, "[thread %d] copyFile fwrite wrote %ld bytes\n", f->threadNum, bytes);
+    //             free(backupPath);
+    //             return(0);
+    //         }
+    //         totalBytes += bytes;
+    //     }
+        
+    //     // Set the bytesCopied part of fplist struct to number of bytes copied from file
+    //     f->bytesCopied = totalBytes;
+    //     printf("[thread %d] Copied %d bytes from %s to %s\n", f->threadNum, f->bytesCopied, f->filepath, backupPath);
+
+    //     // Close the opened files and return
+    //     if(fclose(inputFile) != 0) {
+    //         perror("copyFile inputFile fclose");
+    //         free(backupPath);
+    //         return(0);
+    //     }
+    //     if(fclose(outputFile) != 0) {
+    //         perror("copyFile outputFile fclose");
+    //         free(backupPath);
+    //         return(0);
+    //     }
+    // }
 
     free(backupPath);
     return(0);
 }
 
 // Create threads for file copying, first checking if they are the most recent version
-void createBackupThreads(fplist *sent) {
+void createBackupThreads(fplist *sent, int flag) {
     int filePathCount = 0;
     fplist *p = sent;
     // Don't want to include the sentinel in total count
@@ -385,8 +401,16 @@ void createBackupThreads(fplist *sent) {
     // Copy each filePath into .backup with a seperate thread
     while(p) {
         p->threadNum = threadNumber;
+        p->flag = flag;
+        p->bytesCopied = 0;
         //printf("filepath: %s, threadNum: %d\n", p->filepath, p->threadNum);
-        printf("[thread %d] Backing up %s\n", p->threadNum, p->filepath);
+        if(flag == 0) {
+            printf("[thread %d] Backing up %s\n", p->threadNum, p->filepath);
+        }
+        else if(flag == 1) {
+            printf("[thread %d] Restoring %s\n", p->threadNum, p->filepath);
+        }
+        
         if(pthread_create(&threads[threadNumber-1], NULL, copyFile, p) != 0) {
             perror("createBackupThreads pthread_create error");
         }
@@ -444,16 +468,16 @@ int main(int argc, char** argv) {
         fplist *sent = createfplistSent();
 
         // Get the current working directory to start recursing into
-        char directory[MAX_PATH_LENGTH];
-        if(getcwd(directory, sizeof(directory)) == NULL) {
+        char cwd[MAX_PATH_LENGTH];
+        if(getcwd(cwd, sizeof(cwd)) == NULL) {
             perror("getcwd");
         }
 
         // Recursively read and add filepaths into structure, creating directories in .backup
-        listFiles(directory, sent, 0);
+        listFiles(cwd, sent, 0);
 
         // Copy all of the regular filepaths in structure into .backup
-        createBackupThreads(sent);
+        createBackupThreads(sent, 0);
 
         //printList(sent);
         freeList(sent);
@@ -466,16 +490,18 @@ int main(int argc, char** argv) {
         fplist *sent = createfplistSent();
 
         // Get the .backup directory to start recursing into
-        char directory[MAX_PATH_LENGTH];
-        if(getcwd(directory, sizeof(directory)) == NULL) {
+        char cwd[MAX_PATH_LENGTH];
+        if(getcwd(cwd, sizeof(cwd)) == NULL) {
             perror("getcwd");
         }
-        strcat(directory, "/.backup");
+        strcat(cwd, "/.backup");
 
         // Recursively read and add filepaths into structure, creating directories in current working directory
-        listFiles(directory, sent, 1);
+        listFiles(cwd, sent, 1);
 
-        // TODO: Set struct flag in createBackupThreads()
+        // Copy all of the regular filepaths in structure into current working directory
+        createBackupThreads(sent, 1);
+
         printList(sent);
 
         freeList(sent);
