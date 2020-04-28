@@ -393,24 +393,34 @@ void freeList(fplist *sent) {
 }
 
 int main(int argc, char** argv) {
-    // Create a directory called .backup if one does not already exist
-    createBackup();
+    if(argc == 1) {
+        // Create a directory called .backup if one does not already exist
+        createBackup();
 
-    // Recursively read in all readable regular files/directories into filepath structure
-    // Create new filepath structure for read filepaths to be entered into
-    fplist *sent = createfplistSent();
-    // Get the current working directory to start recursing into
-    char directory[MAX_PATH_LENGTH];
-    if(getcwd(directory, sizeof(directory)) == NULL) {
-        perror("getcwd");
+        // Recursively read in all readable regular files/directories into filepath structure
+        // Create new filepath structure for read filepaths to be entered into
+        fplist *sent = createfplistSent();
+        // Get the current working directory to start recursing into
+        char directory[MAX_PATH_LENGTH];
+        if(getcwd(directory, sizeof(directory)) == NULL) {
+            perror("getcwd");
+        }
+        // Recursively read and add filepaths into structure, creating directories in .backup
+        listFiles(directory, sent);
+
+        // Copy all of the regular filepaths in structure into .backup
+        createBackupThreads(sent);
+
+        //printList(sent);
+        freeList(sent);
+        return(0);
     }
-    // Recursively read and add filepaths into structure, creating directories in .backup
-    listFiles(directory, sent);
-
-    // Copy all of the regular filepaths in structure into .backup
-    createBackupThreads(sent);
-
-    //printList(sent);
-    freeList(sent);
-    
+    else if(argc == 2 && argv[1][0] == '-' && argv[1][1] == 'r') {
+        printf("Restoring from backup\n");
+        return(0);
+    }
+    else {
+        fprintf(stderr, "Back up directory with: ./BackItUp or Restore directory from .backup with: ./BackItUp -r\n");
+        return(1);
+    }
 }
