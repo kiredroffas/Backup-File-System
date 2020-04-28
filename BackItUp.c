@@ -15,7 +15,7 @@
 
 typedef struct fplist{
     char *filepath;
-    int type; // 0 = sentinel, 1 = file
+    int flag; // 0 = backing up, 1 = restoring
     int threadNum;  //Identifying thread number
     int bytesCopied; //Number of bytes copied from file to backup
     struct fplist *next;
@@ -41,7 +41,7 @@ void createBackup() {
 }
 
 // Add a recursively read filepath to the fplist struct, and return the previous linked filepath
-fplist *addList(fplist *prevfp, char *filePath, int type) {
+fplist *addList(fplist *prevfp, char *filePath) {
     while(prevfp->next != NULL) {
         prevfp = prevfp->next;
         //printf("Going to next\n");
@@ -50,7 +50,6 @@ fplist *addList(fplist *prevfp, char *filePath, int type) {
     p->filepath = malloc(strlen(filePath) + 1);
     strcpy(p->filepath, filePath);
     strcat(p->filepath, "\0");
-    p->type = type; 
     p->next = NULL;
 
     prevfp->next = p;
@@ -66,7 +65,6 @@ char *createBackupPath(char *f, char *backupPath, int flag) {
     }
     //printf("directory: %s\n", directory);
 
-    // Iterate and copy filepath into backup path until it matches cwd
     // Make a copy of f->filepath so strtok does not destroy it
     char filepathCopy[MAX_PATH_LENGTH]; 
     strcpy(filepathCopy, f);
@@ -88,7 +86,7 @@ char *createBackupPath(char *f, char *backupPath, int flag) {
         // Append /.backup to the copied matching cwd backup path
         strcat(backupPath, "/.backup");
     }
-    // If flag = 1: Parse through filepath until ./backup and then append the remaining filepath to the cwd
+    // If flag = 1: Parse through filepath until /.backup and then append the remaining filepath to the cwd
     else if(flag == 1) {
         // Keep copying tokens while / delimiter is present in filepath 
         while (token != NULL) { 
@@ -161,7 +159,7 @@ int listFiles(char *directory, fplist *p, int flag) {
         int ret;
         ret = mkdir(backupPath, 0700);
         if(ret != 0) {
-            fprintf(stderr, "copyFile mkdir %s\n", backupPath);
+            fprintf(stderr, "listFiles mkdir %s\n", backupPath);
             perror("mkdir");
         }
         else {
@@ -210,14 +208,14 @@ int listFiles(char *directory, fplist *p, int flag) {
                 //printf("%s/%s\n",directory,entry->d_name); <- could have done this way
 
                 if(firstRun == 0) {
-                    newp = addList(p, filePath, 1);
+                    newp = addList(p, filePath);
                     firstRun++;
-                    //printf("filepath: %s, type: %d\n", newnewp->filepath, newnewp->type);
+                    //printf("filepath: %s\n", newnewp->filepath);
                 }
                 else {
-                    newp = addList(newp, filePath, 1);
+                    newp = addList(newp, filePath);
                     firstRun++;
-                    //printf("filepath: %s, type: %d, firstRun: %d\n", newnewp->filepath, newnewp->type, firstRun);
+                    //printf("filepath: %s, firstRun: %d\n", newnewp->filepath, firstRun);
                 }
             }
             else {
@@ -253,7 +251,6 @@ fplist *createfplistSent() {
     fplist *sent = (fplist *)malloc(sizeof(fplist));
     sent->filepath = malloc(strlen("sentinel") + 1);
     strcpy(sent->filepath, "sentinel\0");
-    sent->type = 0;
     sent->next = NULL;
     return(sent);
 }
@@ -371,7 +368,7 @@ void createBackupThreads(fplist *sent) {
     p = p->next;
     // Get total filePath count so we know how many threads to spawn
     while(p) {
-        //printf("filepath: %s ... type: %d\n", p->filepath, p->type);
+        //printf("filepath: %s\n", p->filepath);
         filePathCount++;
         p = p->next;
     }
@@ -423,7 +420,7 @@ void createBackupThreads(fplist *sent) {
 void printList(fplist *sent) {
     fplist *p = sent;
     while(p) {
-        printf("filepath: %s, type: %d\n", p->filepath, p->type);
+        printf("filepath: %s\n", p->filepath);
         p = p->next;
     }
 }
@@ -477,6 +474,9 @@ int main(int argc, char** argv) {
 
         // Recursively read and add filepaths into structure, creating directories in current working directory
         listFiles(directory, sent, 1);
+
+        // TODO: Set struct flag in createBackupThreads()
+        printList(sent);
 
         freeList(sent);
         return(0);
