@@ -11,7 +11,8 @@
 #include <dirent.h>
 #include <string.h>
 #include <pthread.h>
-#define MAX_PATH_LENGTH 4096 //Max filepath length
+#define MAX_PATH_LENGTH 4096 // Max filepath length
+#define DEBUG 0              // 0 = off, 1 = on
 
 // Linked list stucture to store filepaths
 typedef struct fplist{
@@ -28,11 +29,11 @@ void createBackup() {
     struct stat f;
     // If .backup directory already exists, no action is needed
     if(stat(folder, &f) == 0 && S_ISDIR(f.st_mode)) {
-        printf(".backup directory already exists\n");
+        if(DEBUG) { printf(".backup directory already exists\n\n"); }
     }
     // Else if backup directory does not exist, create a new .backup/ folder 
     else {
-        printf(".backup directory does not exist, creating new .backup\n");
+        if(DEBUG) { printf(".backup directory does not exist, creating new .backup\n\n"); }
         if(mkdir(".backup", 0700) != 0) {
             perror(".backup mkdir");
         }
@@ -104,7 +105,6 @@ char *createBackupPath(char *f, char *backupPath, int flag) {
         // Copy the cwd to the backupPath
         strcpy(backupPath, cwd);
     }
-
     // Continue copying the rest of the original filepath into backup path
     token = strtok(NULL, "/");
     // Keep copying tokens while / delimiter is present in filepath 
@@ -128,7 +128,7 @@ int listFiles(char *directory, fplist *p, int flag) {
         fprintf(stderr,"error = %d : %s, %s isn't readable\n",errno,strerror(errno), directory);
         return(0);
     }
-    printf("--- Directory: %s\n" ,directory);
+    if(DEBUG) { printf("--- Directory: %s\n" ,directory); }
     // flag = 0: If backing up dont want to backup cwd in .backup folder, so get cwd to compare with
     char cwd[MAX_PATH_LENGTH];
     if(getcwd(cwd, sizeof(cwd)) == NULL) {
@@ -155,22 +155,28 @@ int listFiles(char *directory, fplist *p, int flag) {
             backupPath = createBackupPath(directory, backupPath, 1);
         }
         strcat(backupPath, "\0");
-        int ret = mkdir(backupPath, 0700);
-        if(ret != 0) {
-            fprintf(stderr, "listFiles mkdir %s already exists\n", backupPath);
-            perror("mkdir");
+        struct stat f;
+        // If backupPath directory already exists, no action is needed
+        if(stat(backupPath, &f) == 0 && S_ISDIR(f.st_mode)) {
+            if(DEBUG) { printf("%s directory already exists\n", backupPath); }
         }
+        // Else if backupPath directory does not exist, it must be created 
         else {
-            printf("Created %s\n", backupPath);
+            if(DEBUG) { printf("%s directory does not exist, creating\n", backupPath); }
+            if(mkdir(backupPath, 0700) != 0) {
+                perror("backupPath mkdir");
+            }
         }
         free(backupPath);
     }
     else {
-        if(flag == 0) {
-            printf("Not backing up cwd\n");
-        }
-        else if(flag == 1) {
-            printf("Not restoring .backup\n");
+        if(DEBUG) {
+            if(flag == 0) {
+                printf("Not backing up cwd\n");
+            }
+            else if(flag == 1) {
+                printf("Not restoring .backup\n");
+            }
         }
     }
 
@@ -270,7 +276,6 @@ int isBackupMostRecent(char *originalFile, char *backupFile) {
     if (ret != 0) {
         return(-1);
     }
-    
     // Return 1 if the backup file is more recently modified
     if(backupFile_stat.st_mtime > originalFile_stat.st_mtime) {
         return(1);
@@ -315,7 +320,7 @@ void *copyFile(void *file) {
     }
     // Else if original file is more recently modified or backup isnt created yet, copy into .backup/cwd
     else if(ret == 0 || ret == -1) {
-        // If restoring, dont want to restore/overwrite the ./BackItUp executable
+        // If restoring, dont want to restore/overwrite the local ./BackItUp executable
         // Can cause undefined errors if the executable is overwritten mid process
         if(f->flag == 1) {
             int exception = isBackItUpExecutable(backupPath);
@@ -377,7 +382,7 @@ void *copyFile(void *file) {
 
 // Create threads for file copying, first checking if they are the most recent version
 void createBackupThreads(fplist *sent, int flag) {
-    int filePathCount = 0;  // int to track how many files to copy
+    int filePathCount = 0;  // Track how many files to copy
     // Don't want to include the sentinel in total count
     fplist *p = sent->next;
     // Get total filePath count so we know how many threads to spawn
@@ -385,10 +390,11 @@ void createBackupThreads(fplist *sent, int flag) {
         filePathCount++;
         p = p->next;
     }
-    printf("\nTotal files to be copied (threads to be created): %d\n", filePathCount);
+    if(DEBUG) { printf("\n"); }
+    printf("Total files to be copied (threads to be created): %d\n", filePathCount);
 
-    pthread_t threads[filePathCount]; // pthread array to help create each filePath with a seperate thread
-    int threadNumber = 1;             // int to identify threads
+    pthread_t threads[filePathCount]; // Pthread array to help create each filePath with a seperate thread
+    int threadNumber = 1;             // Identify threads
     // Reset fplist pointer to the sentinel and skip the sentinel
     p = sent->next;
     // Copy each filePath into .backup/current working directory with a seperate thread
@@ -418,7 +424,7 @@ void createBackupThreads(fplist *sent, int flag) {
             perror("createBackupThreads pthread_join error");
         } 
     }
-    printf("All threads have joined\n");
+    if(DEBUG) { printf("All threads have joined\n"); }
 
     // Reset fplist pointer and skip the sentinel
     p = sent->next;
@@ -432,9 +438,10 @@ void createBackupThreads(fplist *sent, int flag) {
         }
         p = p->next;
     }
-    printf("Successfully copied %d files (%d bytes)\n", copyFileCount, totalBytes);
+    printf("Successfully copied %d files (%d bytes)\n\n", copyFileCount, totalBytes);
 }
 
+// Print the fplist structure
 void printList(fplist *sent) {
     fplist *p = sent;
     // Dont print the sentinel
@@ -445,6 +452,7 @@ void printList(fplist *sent) {
     }
 }
 
+// Free the fplist structure
 void freeList(fplist *sent) {
     fplist *tmp;
     while(sent) {
@@ -457,7 +465,7 @@ void freeList(fplist *sent) {
 
 int main(int argc, char** argv) {
     if(argc == 1) {
-        printf("Backing up cwd into .backup\n");
+        printf("Backing up cwd into .backup\n\n");
         // Create a directory called .backup if one does not already exist
         createBackup();
         // Create new filepath structure for read filepaths to be entered into
@@ -472,14 +480,16 @@ int main(int argc, char** argv) {
         // Copy all of the regular filepaths in structure into .backup
         createBackupThreads(sent, 0);
 
-        printf("\nFiles that should have been backed up:\n");
-        printList(sent);
+        if(DEBUG) {
+            printf("Files that should have been backed up:\n");
+            printList(sent);
+        }
 
         freeList(sent);
         return(0);
     }
     else if(argc == 2 && argv[1][0] == '-' && argv[1][1] == 'r') {
-        printf("Restoring from .backup\n");
+        printf("Restoring from .backup\n\n");
         // Create new filepath structure for read filepaths to be entered into
         fplist *sent = createfplistSent();
         // Get the .backup directory to start recursing into
@@ -493,8 +503,10 @@ int main(int argc, char** argv) {
         // Copy all of the regular filepaths in structure into current working directory
         createBackupThreads(sent, 1);
 
-        printf("\nFiles that should have been restored:\n");
-        printList(sent);
+        if(DEBUG) {
+            printf("Files that should have been restored:\n");
+            printList(sent);
+        }
 
         freeList(sent);
         return(0);
