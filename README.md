@@ -16,3 +16,19 @@
 * The BackItUp -r program then allocates a new thread to restore each file stored within the fplist struct without .bak, copying from the .backup folder and printing out a warning if it is overwriting a local file.
 * Again, the restoring process does not restore any files that have a later modification time than the backed up copy, printing out a notice if the local file is already the most current version.
 * Error checking is in place to not accidently overwrite the local ./BackItUp executable with a backed up copy, with a notice being printed if the user attempts to do so.
+# Screenshots
+## Backing Up
+![Alt text](/screenshots/backup1.png?raw=true "backup1")
+![Alt text](/screenshots/backup2.png?raw=true "backup2")
+![Alt text](/screenshots/backup3.png?raw=true "backup3")
+![Alt text](/screenshots/backup4.png?raw=true "backup4")
+## Restoring
+![Alt text](/screenshots/restore1.png?raw=true "restore1")
+![Alt text](/screenshots/restore2.png?raw=true "restore2")
+![Alt text](/screenshots/restore3.png?raw=true "restore3")
+![Alt text](/screenshots/restore4.png?raw=true "restore4")
+## ./BackItUp -r Error Checking
+* If the user backs up the entire directory, restoring would cause the local executable to be overwritten...
+![Alt text](/screenshots/both1.png?raw=true "both1")
+* But instead a notice is printed, and the local executable is not overwritten.
+![Alt text](/screenshots/both2.png?raw=true "both2")
